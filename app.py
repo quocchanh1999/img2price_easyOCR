@@ -128,7 +128,10 @@ def classify_dangBaoChe_final(text):
     return 'Khác (Chưa phân loại)'
 
 def extract_quantity(text):
-    numbers = re.findall(r'(\d+[\.,]?\d*)', str(text))
+    if pd.isnull(text):
+        return 1.0
+    text = str(text).replace('.', '')
+    numbers = re.findall(r'(\d+[\.,]?\d*)', text)
     if not numbers:
         return 1.0
     numbers = [float(n.replace(',', '.')) for n in numbers]
@@ -144,13 +147,17 @@ def extract_ingredient_features_ultimate(row):
     hoatChat_list = [hc.strip() for hc in hoatChat_str.split(';')] if hoatChat_str else []
     so_luong_hoat_chat = len(hoatChat_list)
     hoat_chat_chinh = hoatChat_list[0] if so_luong_hoat_chat > 0 else "không rõ"
+    
     if pd.isnull(hamLuong_val):
-        return pd.Series([so_luong_hoat_chat, hoat_chat_chinh, 0.0, 0.0, 0.0], index=['so_luong_hoat_chat', 'hoat_chat_chinh', 'hl_chinh_mg', 'tong_hl_phu_mg', 'tong_hl_iu'])
+        return pd.Series([so_luong_hoat_chat, hoat_chat_chinh, 0.0, 0.0, 0.0], 
+                        index=['so_luong_hoat_chat', 'hoat_chat_chinh', 'hl_chinh_mg', 'tong_hl_phu_mg', 'tong_hl_iu'])
+    
     hamLuong_normalized = str(hamLuong_val).replace(',', '.')
     dosages = re.findall(UNIT_REGEX, hamLuong_normalized.lower())
     total_mg = 0.0
     total_iu = 0.0
     converted_dosages_mg = []
+    
     for value_str, unit in dosages:
         value = float(value_str)
         if unit in ULTIMATE_UNIT_CONVERSION_MAP:
@@ -158,9 +165,18 @@ def extract_ingredient_features_ultimate(row):
             converted_dosages_mg.append(converted_value)
         elif unit in ['iu', 'ui']:
             total_iu += value
-    hl_chinh_mg = converted_dosages_mg[0] if len(converted_dosages_mg) > 0 else 0.0
-    tong_hl_phu_mg = sum(converted_dosages_mg[1:]) if len(converted_dosages_mg) > 1 else 0.0
-    return pd.Series([so_luong_hoat_chat, hoat_chat_chinh, hl_chinh_mg, tong_hl_phu_mg, total_iu], index=['so_luong_hoat_chat', 'hoat_chat_chinh', 'hl_chinh_mg', 'tong_hl_phu_mg', 'tong_hl_iu'])
+    
+    has_plus = '+' in str(row.get('hoatChat', '')).lower()
+    if has_plus:
+        hl_chinh_mg = sum(converted_dosages_mg) if converted_dosages_mg else 0.0
+        tong_hl_phu_mg = 0.0
+    else:
+        hl_chinh_mg = converted_dosages_mg[0] if len(converted_dosages_mg) > 0 else 0.0
+        tong_hl_phu_mg = sum(converted_dosages_mg[1:]) if len(converted_dosages_mg) > 1 else 0.0
+    
+    return pd.Series([so_luong_hoat_chat, hoat_chat_chinh, hl_chinh_mg, tong_hl_phu_mg, total_iu], 
+                    index=['so_luong_hoat_chat', 'hoat_chat_chinh', 'hl_chinh_mg', 'tong_hl_phu_mg', 'tong_hl_iu'])
+
 
 def parse_user_query(query):
     parsed = {"tenThuoc": "N/A", "hoatChat": np.nan, "hamLuong": np.nan, "soLuong": "N/A", "donViTinh": "N/A"}
@@ -192,7 +208,7 @@ def parse_user_query(query):
     
     parsed["quyCachDongGoi"] = parsed["soLuong"] if pd.notna(parsed["soLuong"]) else parsed["tenThuoc"]
     return parsed
-    
+
 def parse_dosage_value(hamLuong_val):
     if pd.isnull(hamLuong_val):
         return 0.0
@@ -236,7 +252,7 @@ def transform_hybrid_data(hybrid_data, train_columns, target_maps, mean_price):
 
     df['is_dangBaoChe_missing'] = df['dangBaoChe'].isnull().astype(int)
     df['dangBaoChe_final'] = df['dangBaoChe'].apply(classify_dangBaoChe_final)  
-    #df['soLuong'] = df['quyCachDongGoi'].apply(extract_quantity)
+    # df['soLuong'] = df['quyCachDongGoi'].apply(extract_quantity)
     df['loaiDongGoiChinh'] = df['quyCachDongGoi'].apply(get_packaging_type)
     df['donViCoSo'] = df['quyCachDongGoi'].apply(get_base_unit)
 
