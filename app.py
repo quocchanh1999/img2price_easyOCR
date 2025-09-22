@@ -364,7 +364,6 @@ def call_gemini_parser(ocr_text):
         return None
 
 def parse_gemini_response(response_text):
-
     parsed_drugs = []
 
     blocks = re.split(r'\n*(?=[-\d\.]*\s*Tên thuốc:)', response_text)
@@ -379,11 +378,19 @@ def parse_gemini_response(response_text):
         so_luong = re.search(r"Số lượng:\s*(.*)", block)
         don_vi_tinh = re.search(r"Đơn vị tính:\s*(.*)", block)
 
+        # Tách phần số từ soLuong
+        so_luong_value = np.nan
+        if so_luong and "(Chưa xác định)" not in so_luong.group(1):
+            so_luong_text = so_luong.group(1).strip()
+            number_match = re.match(r'(\d+\.?\d*)', so_luong_text)
+            if number_match:
+                so_luong_value = number_match.group(1)
+
         drug_dict = {
             "tenThuoc": ten_thuoc.group(1).strip() if ten_thuoc and "(Chưa xác định)" not in ten_thuoc.group(1) else np.nan,
             "hoatChat": hoat_chat.group(1).strip() if hoat_chat and "(Chưa xác định)" not in hoat_chat.group(1) else np.nan,
             "hamLuong": ham_luong.group(1).strip() if ham_luong and "(Chưa xác định)" not in ham_luong.group(1) else np.nan,
-            "soLuong": so_luong.group(1).strip() if so_luong and "(Chưa xác định)" not in so_luong.group(1) else np.nan,
+            "soLuong": so_luong_value,  # Lưu phần số (e.g., '8' thay vì '8 viên')
             "donViTinh": don_vi_tinh.group(1).strip() if don_vi_tinh and "(Chưa xác định)" not in don_vi_tinh.group(1) else np.nan,
         }
 
