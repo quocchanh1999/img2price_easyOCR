@@ -236,7 +236,7 @@ def transform_hybrid_data(hybrid_data, train_columns, target_maps, mean_price):
 
     df['is_dangBaoChe_missing'] = df['dangBaoChe'].isnull().astype(int)
     df['dangBaoChe_final'] = df['dangBaoChe'].apply(classify_dangBaoChe_final)  
-    df['soLuong'] = df['quyCachDongGoi'].apply(extract_quantity)
+    #df['soLuong'] = df['quyCachDongGoi'].apply(extract_quantity)
     df['loaiDongGoiChinh'] = df['quyCachDongGoi'].apply(get_packaging_type)
     df['donViCoSo'] = df['quyCachDongGoi'].apply(get_base_unit)
 
@@ -324,7 +324,7 @@ def call_gemini_parser(ocr_text):
         Đơn vị: Bộ
 
 
-        Ở những thuốc có dấu (), ví dụ như Gliclazid (Staclazide 30 MR) thì phần trong dấu () là tên thuốc, phần ở ngoài là hoạt chất, như trường hợp này thì tên thuốc là Staclazide 30 MR, hoạt chất là Gliclazid. không được phép lấy cả Gliclazid (Staclazide 30 MR) cho tên thuốc. 
+        Ở những thuốc có dấu (), ví dụ như Gliclazid (Staclazide 30 MR) thì toàn bộ phần trong dấu () là tên thuốc, phần ở ngoài là hoạt chất, như trường hợp này thì tên thuốc là Staclazide 30 MR, hoạt chất là Gliclazid. không được phép lấy cả Gliclazid (Staclazide 30 MR) cho tên thuốc. 
 
         Còn những trường hợp chỉ có chữ in hoa như NEXT G CAL thì NEXT G CAL là tên thuốc luôn. chữ O ngay trước đơn vị như mg là số 0 bị OCR nhầm.
 
@@ -332,6 +332,8 @@ def call_gemini_parser(ocr_text):
 
         Đôi khi kết quả OCR cũng sẽ bị sai chính tả, ví dụ 'Cac lonỉ vitamin' thì bạn sửa lại cho đúng là 'Các loại vitamin'.
         
+        Khi trả về Số lượng thì chỉ cần trả về đúng con số thôi, không trả về kèm đơn vị tính, ví dụ sẽ trả về là Số lượng: 30 chứ không được trả về Số lượng: 30 viên.
+
         Bạn hiểu chưa, và chỉ trả lời bằng cách liệt kê ra tên thuốc và các giá trị tương ứng theo đúng định dạng mà ví dụ tôi đã cung cấp. không trả lời bất cứ gì khác. chỉ trả lời phần cần thiết không giải thích bất cứ gì khác, không mở ngoặc đề chú thích. phải trả lời theo dạng liệt kê xuống dòng như trên. Nhớ là phải liệt kê đủ số lượng đấy nhé.
         OCR đây:
         ---
@@ -380,7 +382,7 @@ st.title("Gợi ý Giá thuốc")
 model, scaler, target_maps, mean_price, df_full, train_cols = load_artifacts()
 
 if df_full is not None:
-    user_query_text = st.text_input("", placeholder="Nhập tên thuốc, ví dụ Hoạt chất (tên thuốc) hàm lượng số lượng...", label_visibility="collapsed")
+    user_query_text = st.text_input("", placeholder="Nhập tên thuốc, ví dụ tên thuốc (hoạt chất) hàm lượng số lượng...", label_visibility="collapsed")
     uploaded_file = st.file_uploader("", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
 
     query_to_process = None
@@ -414,10 +416,14 @@ if df_full is not None:
             st.stop()
 
         valid_drug_count = 0
+        total_gia_kk = 0.0
+        total_gia_tt = 0.0
+        price_details = []
+
         for i, parsed_info in enumerate(lines_to_process):
             search_key = f"{parsed_info.get('tenThuoc','')} {parsed_info.get('hoatChat','')}".strip()
             if not search_key or (pd.isna(parsed_info.get('tenThuoc')) and pd.isna(parsed_info.get('hoatChat'))):
-                continue  
+                continue
             
             valid_drug_count += 1
             if len(lines_to_process) > 1:
@@ -431,15 +437,25 @@ if df_full is not None:
                 st.markdown(f"**Đơn vị tính:** {parsed_info.get('donViTinh') or 'N/A'}")
                 st.markdown("---")
 
+                # Lấy số lượng từ Gemini
+                quantity = float(parsed_info.get('soLuong', '1')) if parsed_info.get('soLuong') and parsed_info.get('soLuong') != 'N/A' else 1.0
+
                 choices = df_full['tenThuoc'].dropna().tolist()
                 best_match, score, _ = process.extractOne(search_key, choices)
                 
                 if not best_match:
                     st.warning("Không tìm thấy thuốc tương tự trong CSDL.")
+                    price_details.append({
+                        'tenThuoc': parsed_info.get('tenThuoc') or '(Chưa xác định)',
+                        'gia_kk': 0.0,
+                        'gia_tt': 0.0,
+                        'quantity': quantity,
+                        'donViTinh': parsed_info.get('donViTinh') or 'N/A'
+                    })
                 else:
                     drug_info_row = df_full[df_full['tenThuoc'] == best_match].iloc[0]
 
-                    if score >= 90:
+                    if score >= 92:
                         can_extrapolate = False
                         if pd.notna(parsed_info.get('hoatChat')) and pd.notna(parsed_info.get('hamLuong')):
                             user_hc_clean = str(parsed_info.get('hoatChat', '')).lower()
@@ -456,17 +472,34 @@ if df_full is not None:
                             st.caption(f"Dựa trên giá của *{best_match}* (độ tương đồng tên: {score:.0f}%)")
                             gia_kk_base = drug_info_row['giaBanBuonDuKien']
                             gia_tt_base = drug_info_row.get('giaThanh', np.nan)
-                            gia_kk_extrapolated = gia_kk_base * ratio
-                            gia_tt_extrapolated = gia_tt_base * ratio if pd.notna(gia_tt_base) else np.nan
+                            gia_kk_extrapolated = gia_kk_base * ratio * quantity
+                            gia_tt_extrapolated = gia_tt_base * ratio * quantity if pd.notna(gia_tt_base) else 0.0
                             st.metric("Giá Kê Khai (Ước tính)", f"{gia_kk_extrapolated:,.0f} VND" if pd.notna(gia_kk_base) else "Không có dữ liệu")
-                            st.metric("Giá Thị Trường (Ước tính)", f"{gia_tt_extrapolated:,.0f} VND" if pd.notna(gia_tt_base) else "Không có dữ liệu")
+                            st.metric("Giá Thị Trường (Ước tính)", f"{gia_tt_extrapolated:,.0f} VND" if gia_tt_extrapolated > 0 else "Không có dữ liệu")
+                            price_details.append({
+                                'tenThuoc': parsed_info.get('tenThuoc'),
+                                'gia_kk': gia_kk_extrapolated if pd.notna(gia_kk_base) else 0.0,
+                                'gia_tt': gia_tt_extrapolated,
+                                'quantity': quantity,
+                                'donViTinh': parsed_info.get('donViTinh') or 'N/A'
+                            })
+                            total_gia_kk += gia_kk_extrapolated if pd.notna(gia_kk_base) else 0.0
+                            total_gia_tt += gia_tt_extrapolated
                         else:
                             st.markdown(f"**Phương thức:** `Levenshtein distance (Thuốc tương đồng: {best_match}, độ tương đồng: {score:.0f}%)`")
-                            gia_kk = drug_info_row['giaBanBuonDuKien']
-                            gia_tt = drug_info_row.get('giaThanh', np.nan)
+                            gia_kk = drug_info_row['giaBanBuonDuKien'] * quantity
+                            gia_tt = drug_info_row.get('giaThanh', np.nan) * quantity if pd.notna(drug_info_row.get('giaThanh')) else 0.0
                             st.metric("Giá Kê Khai", f"{gia_kk:,.0f} VND" if pd.notna(gia_kk) else "Không có dữ liệu")
-                            st.metric("Giá Thị Trường", f"{gia_tt:,.0f} VND" if pd.notna(gia_tt) else "Không có dữ liệu")
-
+                            st.metric("Giá Thị Trường", f"{gia_tt:,.0f} VND" if gia_tt > 0 else "Không có dữ liệu")
+                            price_details.append({
+                                'tenThuoc': parsed_info.get('tenThuoc'),
+                                'gia_kk': gia_kk if pd.notna(gia_kk) else 0.0,
+                                'gia_tt': gia_tt,
+                                'quantity': quantity,
+                                'donViTinh': parsed_info.get('donViTinh') or 'N/A'
+                            })
+                            total_gia_kk += gia_kk if pd.notna(gia_kk) else 0.0
+                            total_gia_tt += gia_tt
                     else:
                         st.markdown(f"**Phương thức:** `XGBoost Regressor`")
                         st.caption(f"Sử dụng thông tin bổ sung (nhà SX, nước SX, Dạng bào chế...) từ thuốc tương tự nhất: *{best_match}*")
@@ -485,8 +518,34 @@ if df_full is not None:
                             scaled_data = scaler.transform(transformed_data)
                             prediction_log = model.predict(scaled_data)
                             prediction = np.expm1(prediction_log)
-                            gia_kk_pred, gia_tt_pred = prediction[0][0], prediction[0][1]
+                            gia_kk_pred, gia_tt_pred = prediction[0][0] * quantity, prediction[0][1] * quantity
                             st.metric("Giá Kê Khai (Dự đoán)", f"{gia_kk_pred:,.0f} VND")
                             st.metric("Giá Thị Trường (Dự đoán)", f"{gia_tt_pred:,.0f} VND")
+                            price_details.append({
+                                'tenThuoc': parsed_info.get('tenThuoc'),
+                                'gia_kk': gia_kk_pred,
+                                'gia_tt': gia_tt_pred,
+                                'quantity': quantity,
+                                'donViTinh': parsed_info.get('donViTinh') or 'N/A'
+                            })
+                            total_gia_kk += gia_kk_pred
+                            total_gia_tt += gia_tt_pred
                         except Exception as e:
                             st.error(f"Lỗi khi dự đoán: {e}")
+                            price_details.append({
+                                'tenThuoc': parsed_info.get('tenThuoc'),
+                                'gia_kk': 0.0,
+                                'gia_tt': 0.0,
+                                'quantity': quantity,
+                                'donViTinh': parsed_info.get('donViTinh') or 'N/A'
+                            })
+
+        if valid_drug_count > 0:
+            st.markdown("--- \n ### Kết quả cho toa thuốc (dự đoán)")
+            st.metric("Tổng Giá Kê Khai", f"{total_gia_kk:,.0f} VND")
+            st.metric("Tổng Giá Thị Trường", f"{total_gia_tt:,.0f} VND")
+            st.markdown("#### Chi tiết giá từng thuốc")
+            for detail in price_details:
+                st.write(f"- **{detail['tenThuoc']}** ({detail['quantity']:.0f} {detail['donViTinh']}): "
+                         f"Giá Kê Khai: {detail['gia_kk']:,.0f} VND, "
+                         f"Giá Thị Trường: {detail['gia_tt']:,.0f} VND")
