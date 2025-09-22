@@ -350,6 +350,8 @@ def call_gemini_parser(ocr_text):
         
         Khi trả về Số lượng thì chỉ cần trả về đúng con số thôi, không trả về kèm đơn vị tính, ví dụ sẽ trả về là Số lượng: 30 chứ không được trả về Số lượng: 30 viên.
 
+        Nhớ lấy hàm lượng một cách thông minh để cố gắng không bị sót hàm lượng để trả về nan nhé.
+
         Bạn hiểu chưa, và chỉ trả lời bằng cách liệt kê ra tên thuốc và các giá trị tương ứng theo đúng định dạng mà ví dụ tôi đã cung cấp. không trả lời bất cứ gì khác. chỉ trả lời phần cần thiết không giải thích bất cứ gì khác, không mở ngoặc đề chú thích. phải trả lời theo dạng liệt kê xuống dòng như trên. Nhớ là phải liệt kê đủ số lượng đấy nhé.
         OCR đây:
         ---
